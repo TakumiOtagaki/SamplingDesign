@@ -9,15 +9,15 @@
 
 #include "main.h"
 
-int GradientDescent::selectRandomIndex(const std::vector<double>& weights) {
+int GradientDescent::selectRandomIndex(const std::vector<double>& weights, std::mt19937& rng) {
     // Create a discrete distribution based on the weights
     std::discrete_distribution<> dist(weights.begin(), weights.end());
 
     // Generate a random index
-    return dist(gen);
+    return dist(rng);
 }
 
-void GradientDescent::sample() {
+void GradientDescent::sample(int step) {
     string nucs = "ACGU";
 
     if (samples.size() < sample_size){
@@ -25,13 +25,25 @@ void GradientDescent::sample() {
     }
 
     // draw samples from distribution and compute the probability from seq. distribution
+    int thread_count = omp_get_max_threads();
+    if (num_threads > 0) {
+        thread_count = num_threads;
+    }
+    vector<std::mt19937> rngs(thread_count);
+    for (int t = 0; t < thread_count; t++) {
+        rngs[t].seed(static_cast<unsigned int>(seed + (step + 1) * 10007 + (t + 1) * 7919));
+    }
+
+    #pragma omp parallel for
     for (int k = 0; k < sample_size; k++) {
+        int tid = omp_get_thread_num();
+        std::mt19937& rng = rngs[tid];
         string seq = string(rna_struct.size(), 'A');
 
         double sample_prob = 1.;
         for(const vector<int>& pos: unpaired_pos) {
             const vector<double>& probs = dist[pos];
-            int idx = selectRandomIndex(probs);
+            int idx = selectRandomIndex(probs, rng);
             string nucij = idx_to_nucs[{idx, pos.size()}];
 
             for (int x = 0; x < pos.size(); x++) {
@@ -43,7 +55,7 @@ void GradientDescent::sample() {
 
         for(const vector<int>& pos: base_pairs_pos) {
             const vector<double>& probs = dist[pos];
-            int idx = selectRandomIndex(probs);
+            int idx = selectRandomIndex(probs, rng);
             string nucij = idx_to_pairs[{idx, pos.size()}];
 
             for (int x = 0; x < pos.size(); x++) {
@@ -142,10 +154,10 @@ Objective GradientDescent::sampling_approx(int step, double kl_div) {
         if (step % 2 == 1) {
             recompute_prob(); // no resampling, just recompute probability of the sample under the current distribution
         } else {
-            sample();
+            sample(step);
         }
     } else {
-        sample();
+        sample(step);
     }
 
     // Approximate expected objective value with Monte-Carlo

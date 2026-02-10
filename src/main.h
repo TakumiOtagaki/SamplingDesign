@@ -22,6 +22,13 @@
 #include <set>
 #include <random>
 #include <algorithm>
+#ifdef _OPENMP
+#include <omp.h>
+#else
+inline int omp_get_max_threads() { return 1; }
+inline int omp_get_thread_num() { return 0; }
+inline void omp_set_num_threads(int) {}
+#endif
 
 // #define MIN_CUBE_PRUNING_SIZE 20
 #define kT 61.63207755
@@ -287,7 +294,7 @@ private:
 
     // random
     std::mt19937 gen;
-    int selectRandomIndex(const std::vector<double>& weights);
+    int selectRandomIndex(const std::vector<double>& weights, std::mt19937& rng);
 
     struct Sample {
         string seq;
@@ -296,7 +303,7 @@ private:
         double obj;
     };
 
-    void sample();
+    void sample(int step);
     void recompute_prob();
 
     vector<Sample> samples;

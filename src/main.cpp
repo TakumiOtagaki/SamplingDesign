@@ -20,7 +20,6 @@ with Coupled Variables and Monte-Carlo Sampling
 #include <string>
 #include <map>
 #include <stdio.h>
-#include <omp.h>
 
 #include "main.h"
 #include "Utils/utility.h"
@@ -1030,4 +1029,3 @@ int main(int argc, char** argv){
 
     return 0;
 }
-

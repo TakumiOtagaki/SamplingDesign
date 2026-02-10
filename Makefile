@@ -7,7 +7,8 @@
 
 CC=g++
 DEPS=src/main.h src/Utils/energy_parameter.h src/Utils/feature_weight.h src/Utils/intl11.h src/Utils/intl21.h src/Utils/intl22.h src/Utils/utility_v.h src/Utils/utility.h src/Sampling.cpp src/LinearPartition.cpp src/LinearPartition.h src/bpp.cpp
-CFLAGS=-std=c++17 -O3 -fopenmp
+OPENMP_FLAGS=$(shell echo | $(CC) -fopenmp -dM -E - >/dev/null 2>&1 && echo -fopenmp)
+CFLAGS=-std=c++17 -O3 $(OPENMP_FLAGS)
 .PHONY : clean main
 objects=bin/main
 
