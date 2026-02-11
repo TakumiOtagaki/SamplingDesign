@@ -18,6 +18,7 @@ with Coupled Variables and Monte-Carlo Sampling
 #include <unordered_map>
 #include <algorithm>
 #include <string>
+#include <sstream>
 #include <map>
 #include <stdio.h>
 
@@ -271,6 +272,38 @@ void GradientDescent::initialize_dist_no_mismatch() {
         }
     }
 
+    initialize_simple_dist_from_positions();
+}
+
+void GradientDescent::initialize_dist_with_external_pairs() {
+    vector<int> partner(rna_struct.size(), -1);
+    for (const auto& p : external_pair_constraints) {
+        int i = p.first;
+        int j = p.second;
+        if (i < 0 || j < 0 || i >= rna_struct.size() || j >= rna_struct.size() || i >= j) {
+            throw std::runtime_error("Invalid pair index in pair constraints.");
+        }
+        if (partner[i] != -1 || partner[j] != -1) {
+            throw std::runtime_error("Pair constraints overlap on nucleotide positions.");
+        }
+        partner[i] = j;
+        partner[j] = i;
+        base_pairs_pos.push_back({i, j});
+    }
+
+    for (int idx = 0; idx < rna_struct.size(); idx++) {
+        if (partner[idx] == -1) {
+            unpaired_pos.push_back({idx});
+        }
+    }
+
+    initialize_simple_dist_from_positions();
+}
+
+void GradientDescent::initialize_simple_dist_from_positions() {
+    sort(base_pairs_pos.begin(), base_pairs_pos.end());
+    sort(unpaired_pos.begin(), unpaired_pos.end());
+
     // create distributions
     if (init == "uniform") {
         for (const vector<int>& pos: unpaired_pos) {
@@ -317,6 +350,10 @@ void GradientDescent::initialize_dist_no_mismatch() {
 
 void GradientDescent::initialize_dist() {
     // Initialize logits or distributions (based on parameterization)
+    if (!external_pair_constraints.empty()) {
+        initialize_dist_with_external_pairs();
+        return;
+    }
 
     if (!mismatch) {
         // distribution (v0) - no coupled positions
@@ -449,6 +486,10 @@ void GradientDescent::initialize_dist() {
     }
 
     return;
+}
+
+void GradientDescent::set_external_pair_constraints(const vector<pair<int, int>>& pair_constraints) {
+    external_pair_constraints = pair_constraints;
 }
 
 void GradientDescent::print_dist(string label, map<vector<int>, vector<double>>& dist) {
@@ -672,6 +713,94 @@ void is_valid_target_structure(const string& structure) {
     if (!s.empty()) {
         throw std::runtime_error("Invalid target structure.");
     }
+}
+
+vector<pair<int, int>> parse_target_structure_pairs(const string& structure) {
+    vector<pair<int, int>> pairs;
+    stack<int> stk;
+    for (int idx = 0; idx < structure.size(); idx++) {
+        if (structure[idx] == '(') {
+            stk.push(idx);
+        } else if (structure[idx] == ')') {
+            if (stk.empty()) {
+                throw std::runtime_error("Invalid target structure.");
+            }
+            int left = stk.top();
+            stk.pop();
+            pairs.push_back({left, idx});
+        }
+    }
+    if (!stk.empty()) {
+        throw std::runtime_error("Invalid target structure.");
+    }
+    return pairs;
+}
+
+vector<pair<int, int>> load_pair_constraints_file(const string& path) {
+    vector<pair<int, int>> pairs;
+    if (path.empty()) {
+        return pairs;
+    }
+
+    ifstream in(path);
+    if (!in.is_open()) {
+        throw std::runtime_error("Failed to open pair constraints file.");
+    }
+
+    string line;
+    while (getline(in, line)) {
+        if (line.empty()) {
+            continue;
+        }
+
+        stringstream row(line);
+        int i = -1;
+        int j = -1;
+        string trailing;
+        if (!(row >> i >> j) || (row >> trailing)) {
+            throw std::runtime_error("Invalid pair constraints format.");
+        }
+        pairs.push_back({i, j});
+    }
+    return pairs;
+}
+
+vector<pair<int, int>> merge_validate_pairs(const string& structure,
+                                            const vector<pair<int, int>>& base_pairs,
+                                            const vector<pair<int, int>>& extra_pairs) {
+    vector<pair<int, int>> merged;
+    merged.reserve(base_pairs.size() + extra_pairs.size());
+    vector<int> partner(structure.size(), -1);
+
+    auto add_pair = [&](pair<int, int> p) {
+        int i = p.first;
+        int j = p.second;
+        if (i > j) {
+            std::swap(i, j);
+        }
+        if (i < 0 || j < 0 || i >= structure.size() || j >= structure.size() || i == j) {
+            throw std::runtime_error("Pair constraints out of range.");
+        }
+        if (partner[i] == j && partner[j] == i) {
+            return;
+        }
+        if (partner[i] != -1 || partner[j] != -1) {
+            throw std::runtime_error("Pair constraints overlap target structure positions.");
+        }
+        partner[i] = j;
+        partner[j] = i;
+        merged.push_back({i, j});
+    };
+
+    for (const auto& p : base_pairs) {
+        add_pair(p);
+    }
+    for (const auto& p : extra_pairs) {
+        add_pair(p);
+    }
+
+    sort(merged.begin(), merged.end());
+    return merged;
 }
 
 void GradientDescent::gradient_descent() {
@@ -932,8 +1061,13 @@ int main(int argc, char** argv){
     int seed = 42;
     int num_threads = 0;
     bool boxplot = false;
+    string pair_constraints_file = "";
 
     if (argc > 1) {
+        if (argc < 31) {
+            std::cerr << "Insufficient arguments." << std::endl;
+            return 1;
+        }
         mode = argv[1];
         objective = argv[2];
         
@@ -972,6 +1106,20 @@ int main(int argc, char** argv){
         verbose = atoi(argv[28]) == 1;
         num_threads = atoi(argv[29]);
         boxplot = atoi(argv[30]) == 1;
+
+        for (int i = 31; i < argc; i++) {
+            string arg = argv[i];
+            if (arg == "--pair-constraints-file") {
+                if (i + 1 >= argc) {
+                    std::cerr << "Missing value for --pair-constraints-file" << std::endl;
+                    return 1;
+                }
+                pair_constraints_file = argv[++i];
+            } else {
+                std::cerr << "Unknown option: " << arg << std::endl;
+                return 1;
+            }
+        }
     }
 
     if (mode == "eval") {
@@ -987,7 +1135,12 @@ int main(int argc, char** argv){
 
                 try {
                     is_valid_target_structure(rna_struct);
+                    vector<pair<int, int>> merged_pairs = merge_validate_pairs(
+                        rna_struct,
+                        parse_target_structure_pairs(rna_struct),
+                        load_pair_constraints_file(pair_constraints_file));
                     GradientDescent parser(rna_struct, objective, init, eps, softmax, adam, nesterov, beta_1, beta_2, initial_lr, lr_decay, lr_decay_rate, adaptive_lr, k_ma_lr, lr_decay_step, num_steps, early_stop, k_ma, beamsize, !sharpturn, is_lazy, sample_size, best_k, importance, mismatch, trimismatch, seed, verbose, num_threads, boxplot);
+                    parser.set_external_pair_constraints(merged_pairs);
                     
                     string mfe_struct = parser.get_mfe_struct(rna_seq);
                     double prob = parser.boltzmann_prob(rna_seq, rna_struct);
@@ -1014,7 +1167,12 @@ int main(int argc, char** argv){
             if (rna_struct.size() > 0) {
                 try {
                     is_valid_target_structure(rna_struct); // throws error if target structure is not valid
+                    vector<pair<int, int>> merged_pairs = merge_validate_pairs(
+                        rna_struct,
+                        parse_target_structure_pairs(rna_struct),
+                        load_pair_constraints_file(pair_constraints_file));
                     GradientDescent parser(rna_struct, objective, init, eps, softmax, adam, nesterov, beta_1, beta_2, initial_lr, lr_decay, lr_decay_rate, adaptive_lr, k_ma_lr, lr_decay_step, num_steps, early_stop, k_ma, beamsize, !sharpturn, is_lazy, sample_size, best_k, importance, mismatch, trimismatch, seed, verbose, num_threads, boxplot);
+                    parser.set_external_pair_constraints(merged_pairs);
                     parser.gradient_descent();
                 } catch (const std::exception& e) {
                     std::cerr << "Exception caught: " << e.what() << std::endl;

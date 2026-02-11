@@ -16,6 +16,7 @@
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <math.h> 
 #include <stdio.h> 
 #include <iomanip>
@@ -205,6 +206,7 @@ public:
 
     vector<vector<int>> base_pairs_pos; // key: [i, j] for paired position
     vector<vector<int>> unpaired_pos; // key: [i] for unpaired, [i, j] for mismatches and [i, j, k] for trimismatches
+    vector<pair<int, int>> external_pair_constraints;
 
     // Adam optimizer
     pair<double, double> beta;
@@ -252,6 +254,9 @@ public:
     // initiailization
     void initialize_dist();
     void initialize_dist_no_mismatch();
+    void initialize_dist_with_external_pairs();
+    void initialize_simple_dist_from_positions();
+    void set_external_pair_constraints(const vector<pair<int, int>>& pair_constraints);
 
     void gradient_descent();
     string get_max_probability_solution();
