@@ -23,6 +23,7 @@ with Coupled Variables and Monte-Carlo Sampling
 #include <stdio.h>
 
 #include "main.h"
+#include "PairConstraints.h"
 #include "Utils/utility.h"
 #include "Utils/utility_v.h"
 
@@ -686,121 +687,6 @@ double GradientDescent::kl_divergence() {
     }
 
     return kl_div;
-}
-
-void is_valid_target_structure(const string& structure) {
-    stack<char> s;
-    string validChars = "().";
-
-    for (char c : structure) {
-        // Ensure all characters are valid
-        if (validChars.find(c) == string::npos) {
-            throw std::runtime_error("Invalid target structure.");
-        }
-
-        // Check for balanced parentheses
-        if (c == '(') {
-            s.push(c);
-        } else if (c == ')') {
-            if (s.empty() || s.top() != '(') {
-                throw std::runtime_error("Invalid target structure.");
-            }
-            s.pop();
-        }
-    }
-
-    // Ensure no unmatched parentheses remain
-    if (!s.empty()) {
-        throw std::runtime_error("Invalid target structure.");
-    }
-}
-
-vector<pair<int, int>> parse_target_structure_pairs(const string& structure) {
-    vector<pair<int, int>> pairs;
-    stack<int> stk;
-    for (int idx = 0; idx < structure.size(); idx++) {
-        if (structure[idx] == '(') {
-            stk.push(idx);
-        } else if (structure[idx] == ')') {
-            if (stk.empty()) {
-                throw std::runtime_error("Invalid target structure.");
-            }
-            int left = stk.top();
-            stk.pop();
-            pairs.push_back({left, idx});
-        }
-    }
-    if (!stk.empty()) {
-        throw std::runtime_error("Invalid target structure.");
-    }
-    return pairs;
-}
-
-vector<pair<int, int>> load_pair_constraints_file(const string& path) {
-    vector<pair<int, int>> pairs;
-    if (path.empty()) {
-        return pairs;
-    }
-
-    ifstream in(path);
-    if (!in.is_open()) {
-        throw std::runtime_error("Failed to open pair constraints file.");
-    }
-
-    string line;
-    while (getline(in, line)) {
-        if (line.empty()) {
-            continue;
-        }
-
-        stringstream row(line);
-        int i = -1;
-        int j = -1;
-        string trailing;
-        if (!(row >> i >> j) || (row >> trailing)) {
-            throw std::runtime_error("Invalid pair constraints format.");
-        }
-        pairs.push_back({i, j});
-    }
-    return pairs;
-}
-
-vector<pair<int, int>> merge_validate_pairs(const string& structure,
-                                            const vector<pair<int, int>>& base_pairs,
-                                            const vector<pair<int, int>>& extra_pairs) {
-    vector<pair<int, int>> merged;
-    merged.reserve(base_pairs.size() + extra_pairs.size());
-    vector<int> partner(structure.size(), -1);
-
-    auto add_pair = [&](pair<int, int> p) {
-        int i = p.first;
-        int j = p.second;
-        if (i > j) {
-            std::swap(i, j);
-        }
-        if (i < 0 || j < 0 || i >= structure.size() || j >= structure.size() || i == j) {
-            throw std::runtime_error("Pair constraints out of range.");
-        }
-        if (partner[i] == j && partner[j] == i) {
-            return;
-        }
-        if (partner[i] != -1 || partner[j] != -1) {
-            throw std::runtime_error("Pair constraints overlap target structure positions.");
-        }
-        partner[i] = j;
-        partner[j] = i;
-        merged.push_back({i, j});
-    };
-
-    for (const auto& p : base_pairs) {
-        add_pair(p);
-    }
-    for (const auto& p : extra_pairs) {
-        add_pair(p);
-    }
-
-    sort(merged.begin(), merged.end());
-    return merged;
 }
 
 void GradientDescent::gradient_descent() {
